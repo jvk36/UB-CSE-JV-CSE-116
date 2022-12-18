@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html>
+<style>
+
+canvas {
+    background-color: olivedrab;
+}
+
+body {
+    background-color: olivedrab;
+}
+
+</style>
+<body onload="startGame()">
+<script>
+
+function action_on_default(msg){
+  return JSON.parse(msg);
+}
+
+function action_on_get_positions(msg){
+	r = JSON.parse(msg);
+
+  if (g_mode=='true') {
+    console.log("Game State: ")
+    console.log(r)
+  }
+
+	p_coords.x = r.p_left; p_coords.y = r.p_top; p_coords.width = r.p_width; p_coords.height = r.p_height
+	r_coords.x = r.r_left; r_coords.y = r.r_top; r_coords.width = r.r_width; r_coords.height = r.r_height
+	b_in_redzone = r.b_in_redzone
+  for (var i=0; i<r.op_positions.length; i++) {
+    o_coords[i] = new Object();
+    o_coords[i].x = r.op_positions[i].o_left; o_coords[i].y = r.op_positions[i].o_top;
+    o_coords[i].width = r.op_positions[i].o_width; o_coords[i].height = r.op_positions[i].o_height;    
+  } 
+}
+
+function action_on_get_new_position(msg){
+  r = JSON.parse(msg);
+  p_coords.x = r.p_left; p_coords.y = r.p_top; p_coords.width = r.p_width; p_coords.height = r.p_height
+}
+
+var g_mode; // game mode - UnitTesting (true) or Release (false) modes
+
+var p_name; // player name
+var p_coords = new Object(), r_coords = new Object();
+var b_in_redzone = false;
+var o_coords = [];
+var game_interval = 50 // milliseconds
+function init_game() {
+  game_dict = {
+      "p_name": p_name,
+      "p_left": Math.floor(Math.random()*myGameArea.canvas.width),
+      "p_top": Math.floor(Math.random()*myGameArea.canvas.height), 
+      "p_width": 48, 
+      "p_height": 53,
+      "m_width": myGameArea.canvas.width
+  }
+  url = "http://127.0.0.1:8080/init"
+  ajaxPostRequest(url, JSON.stringify(game_dict), action_on_default);
+
+}
+
+function remove_player() {
+  url = "http://127.0.0.1:8080/remove_player"
+  pname_dict = {
+      "name": p_name
+  }
+  ajaxPostRequest(url, JSON.stringify(pname_dict), action_on_default);  
+}
+
+function get_positions() {
+  url = "http://127.0.0.1:8080/get_positions"
+  pname_dict = {
+      "name": p_name
+  }
+//  console.log(pname_dict)
+  ajaxPostRequest(url, JSON.stringify(pname_dict), action_on_get_positions)	
+}
+
+function get_new_position(x, y) {
+  url = "http://127.0.0.1:8080/get_new_position"
+  pos = {
+      "name": p_name,
+      "change_x": x,
+      "change_y": y
+  }
+  ajaxPostRequest(url, JSON.stringify(pos), action_on_get_new_position)	
+}
+
+var myGamePiece;
+var myObstacle;
+var myScore;
+var myOtherPlayers=[];
+
+function startGame() {
+  p_name = localStorage.getItem("name");
+  g_mode = localStorage.getItem("unitTest");
+  if (g_mode=='true') {
+    console.log("Game running in Unit Testing Mode");
+  } 
+  
+  myGameArea.start();
+  init_game();
+  get_positions();
+  myGamePiece = new component(p_coords.width, p_coords.height,"player.gif", p_coords.x, p_coords.y, "image");
+  myScore = new component("30px", "Consolas", "black", 280, 40, "text");
+  myBackground = new component(1500, 1000, "game_background.gif", 0, 0, "image");
+  myObstacle = new component(r_coords.width, r_coords.height, "red", r_coords.x, r_coords.y)
+  for (var i=0; i<o_coords.length; i++) {
+    myOtherPlayers[i] = new component(o_coords[i].width, o_coords[i].height, "other_player1.gif", o_coords[i].x, o_coords[i].y, "image");
+  } 
+}
+
+var myGameArea = {
+  canvas : document.createElement("canvas"),
+  start : function() {
+    this.canvas.width = document.body.clientWidth;
+    this.canvas.height = window.innerHeight-30;
+    this.context = this.canvas.getContext("2d");
+    document.body.insertBefore(this.canvas, document.body.childNodes[0]);
+    this.interval = setInterval(updateGameArea, game_interval);
+    this.frameNo = 0;
+    this.crash = 0;
+    window.addEventListener('keydown', function (e) {
+    	myGameArea.key = e.keyCode; 
+    })
+    window.addEventListener('keyup', function (e) {
+    	myGameArea.key = false;
+    })
+  },
+  clear : function() {
+    this.context.clearRect(0, 0, this.canvas.width, this.canvas.height);
+  },
+  stop : function() {
+    myGameArea.clear();
+    myBackground.update();
+    remove_player()
+    if (myGameArea.frameNo>=30000/game_interval) {
+      myScore.text = "You Won!!! Successfully Survived " + myGameArea.frameNo*game_interval/1000 + " seconds.";
+    } else {
+      myScore.text = "Game Over!!! Survival Time (secs): " + myGameArea.frameNo*game_interval/1000;
+    }
+    myScore.update();
+    clearInterval(this.interval);
+  }
+}
+
+function everyinterval(n) {
+  if ((myGameArea.frameNo / n) % 1 == 0) {return true;}
+  return false;
+}
+
+function component(width, height, color, x, y, type) {
+  this.type = type;
+  if (type == "image") {
+    this.image = new Image();
+    this.image.src = color;
+  }
+  this.width = width;
+  this.height = height;
+  this.x = x;
+  this.y = y; 
+  this.update = function(){
+    ctx = myGameArea.context;
+    if (type == "image") {
+      ctx.drawImage(this.image, 
+        this.x, 
+        this.y,
+        this.width, this.height);
+    } else if (this.type == "text") {
+      ctx.fillStyle = color;
+      ctx.font = this.width + " " + this.height;
+      ctx.fillText(this.text, this.x, this.y);
+    } else {
+      ctx.fillStyle = color;
+      ctx.fillRect(this.x, this.y, this.width, this.height);
+    }
+  }
+}
+
+function updateGameArea() {
+	var x, y;
+	get_positions()
+	if (b_in_redzone) {
+		myGameArea.crash += 1;
+		if (myGameArea.crash==Math.floor(5000/game_interval)) {
+		  myGameArea.crash=0;
+		  myGameArea.stop();
+		  return;
+		}
+	} 
+
+	if (myGameArea.frameNo == Math.floor(30000/game_interval)) {
+		myGameArea.stop();
+		return;
+	}
+
+	myGameArea.clear();
+	myBackground.update();
+	if (myGameArea.key && myGameArea.key == 37) {get_new_position(-3,0);}
+	if (myGameArea.key && myGameArea.key == 39) {get_new_position(3,0);}
+	if (myGameArea.key && myGameArea.key == 38) {get_new_position(0,-3);}
+	if (myGameArea.key && myGameArea.key == 40) {get_new_position(0,3);}
+	myGameArea.frameNo += 1;
+	myObstacle.x = r_coords.x; myObstacle.y = r_coords.y; myObstacle.width=r_coords.width; myObstacle.height=r_coords.height
+	myObstacle.update();
+	myScore.text = "SURVIVAL TIME PERIOD (secs): " + myGameArea.frameNo*game_interval/1000;
+	myScore.update();
+	myGamePiece.x = p_coords.x; myGamePiece.y = p_coords.y; myGamePiece.width=p_coords.width; myGamePiece.height=p_coords.height
+	myGamePiece.update();
+  if (g_mode=='true') {
+    console.log("Player info: "+p_coords.x+", "+p_coords.y);
+  }
+  if (o_coords.length < myOtherPlayers.length) {
+    myOtherPlayers.length = o_coords.length; 
+  }
+  for (var i=0; i<myOtherPlayers.length; i++) {
+    myOtherPlayers[i].x = o_coords[i].x; myOtherPlayers[i].y = o_coords[i].y; 
+    myOtherPlayers[i].width=o_coords[i].width; myOtherPlayers[i].height=o_coords[i].height;
+  }
+  for (var i=myOtherPlayers.length; i<o_coords.length; i++) {
+    myOtherPlayers[i] = new component(o_coords[i].width, o_coords[i].height, "other_player1.gif", o_coords[i].x, o_coords[i].y, "image");
+    if (g_mode=='true') {
+      console.log("Other Player info: "+o_coords[i].x+", "+o_coords[i].y);
+    }
+  }
+  for (var i=0; i<myOtherPlayers.length; i++) {
+    myOtherPlayers[i].update();
+  }
+}
+
+function ajaxGetRequest(path, callback){
+  var request = new XMLHttpRequest();
+  request.onreadystatechange = function(){
+    if (this.readyState === 4 && this.status === 200){
+      callback(this.response);
+    }
+  };
+  request.open("GET", path);
+  request.send();
+}
+
+function ajaxPostRequest(path, data, callback){
+  var request = new XMLHttpRequest();
+  request.onreadystatechange = function(){
+    if (this.readyState === 4 && this.status === 200){
+      callback(this.response);
+    }
+  };
+  request.open("POST", path);
+  request.send(data);
+}
+
+
+</script>
+</body>
+</html>
